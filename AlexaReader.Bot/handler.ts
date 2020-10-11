@@ -2,6 +2,7 @@ import { APIGatewayProxyHandler } from 'aws-lambda';
 import 'source-map-support/register';
 import Telegraf from "telegraf";
 import Telegram from "telegraf/telegram";
+import axios from "axios";
 
 export const hello: APIGatewayProxyHandler = async (event, _context) => {
   const requestBody = event.body[0] === '{' ?
@@ -23,8 +24,29 @@ export const hello: APIGatewayProxyHandler = async (event, _context) => {
     await ctx.reply(instructions);
   });
 
-  bot.hears("/email", async (ctx) => {
+  bot.command("email", async (ctx) => {
     await ctx.reply(ctx.update.message.text);
+  });
+
+  bot.on("document", async (ctx) => {
+    const { document } = ctx.message;
+
+    console.log(document);
+
+    if (document.mime_type !== "application/epub+zip") {
+      await ctx.reply("Formato de arquivo inválido. Por favor, faça upload de um arquivo .epub");
+    }
+    else if (document.file_size > 10485760) {
+      await ctx.reply("Arquivo excedeu o limite de 10 MB");
+    }
+    else {
+      const response = await
+        axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getFile?file_id=${document.file_id}`);
+
+      const { file_path } = response.data.result;
+
+      console.log(file_path);
+    }
   });
 
   await bot.handleUpdate(requestBody);
