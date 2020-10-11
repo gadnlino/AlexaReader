@@ -443,3 +443,6 @@ InitTestScene*.unity
 
 # End of https://www.toptal.com/developers/gitignore/api/node,unity,aspnetcore
 AlexaReader.Bot/serverless.ts
+*serverless.yml
+AlexaReader.Core/test/
+AlexaReader.Core/EpubDownloader/testdata.json

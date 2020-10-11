@@ -1,8 +1,9 @@
 import { APIGatewayProxyHandler } from 'aws-lambda';
 import 'source-map-support/register';
 import Telegraf from "telegraf";
-import Telegram from "telegraf/telegram";
-import axios from "axios";
+import awsService from "./awsService";
+import { EpubDownloadContract } from './models';
+
 
 export const hello: APIGatewayProxyHandler = async (event, _context) => {
   const requestBody = event.body[0] === '{' ?
@@ -40,12 +41,24 @@ export const hello: APIGatewayProxyHandler = async (event, _context) => {
       await ctx.reply("Arquivo excedeu o limite de 10 MB");
     }
     else {
-      const response = await
-        axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getFile?file_id=${document.file_id}`);
+      // const response = await
+      //   axios.get(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/getFile?file_id=${document.file_id}`);
 
-      const { file_path } = response.data.result;
+      // const { file_path } = response.data.result;
 
-      console.log(file_path);
+      // console.log(file_path);
+      var contract: EpubDownloadContract = {
+        file_id: document.file_id,
+        from_id: ctx.message.from.id.toString(),
+        chat_id: ctx.message.chat.id.toString(),
+        first_name: ctx.message.from.first_name,
+        last_name: ctx.message.from.last_name
+      };
+
+      await awsService.sqs.sendMessage(process.env.FILE_DOWNLOADER_QUEUE_URL,
+        JSON.stringify(contract));
+      await ctx.reply("Epub enviado com sucesso!");
+      await ctx.reply("O livro estará disponível na sua biblioteca em breve.");
     }
   });
 
