@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace EpubFileDownloader.Model
+namespace AlexaReader.Core.Model
 {
     public class EpubDownloadContract
     {

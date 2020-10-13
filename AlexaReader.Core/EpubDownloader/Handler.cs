@@ -3,7 +3,6 @@ using Amazon.Lambda.SQSEvents;
 using Amazon.SQS.Internal;
 using System.Threading.Tasks;
 using Amazon.SQS.Model;
-using EpubFileDownloader.Model;
 using System.Text.Json.Serialization;
 using Newtonsoft.Json;
 using System.IO;
@@ -11,6 +10,7 @@ using System;
 using System.Net.Http;
 using System.Net;
 using EpubFileDownloader.Service;
+using AlexaReader.Core.Model;
 
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
 namespace EpubFileDownloader
