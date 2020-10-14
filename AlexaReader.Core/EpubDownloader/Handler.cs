@@ -36,7 +36,8 @@ namespace EpubFileDownloader
 
             string bucketName = Environment.GetEnvironmentVariable("ALEXA_READER_BUCKET");
             string contentType = "application/epub+zip";
-            string fileName = $"{epubDownloadContract.FromId}/{Guid.NewGuid().ToString()}.epub";
+            string uuid = Guid.NewGuid().ToString();
+            string fileName = $"{epubDownloadContract.FromId}/{uuid}/{uuid}.epub";
 
             AwsService.S3.PutObject(fileStream, fileName, bucketName, contentType);
         }
