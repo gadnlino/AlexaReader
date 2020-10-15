@@ -6,10 +6,10 @@ namespace AlexaReader.Core.Model
 {
     public class EpubProcessContract
     {
-        public string FirstName { get; set; }
-        public string LastName { get; set; }
         public string FileName { get; set; }
+        public string FolderName { get; set; }
         public string FromId { get; set; }
         public string ChatId { get; set; }
+        public List<int> ChaptersToProcess { get; set; }
     }
 }

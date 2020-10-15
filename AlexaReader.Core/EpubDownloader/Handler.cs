@@ -37,9 +37,21 @@ namespace EpubFileDownloader
             string bucketName = Environment.GetEnvironmentVariable("ALEXA_READER_BUCKET");
             string contentType = "application/epub+zip";
             string uuid = Guid.NewGuid().ToString();
-            string fileName = $"{epubDownloadContract.FromId}/{uuid}/{uuid}.epub";
+            string folderName = $"{epubDownloadContract.FromId}/{uuid}";
+            string fileName = $"{uuid}.epub";
 
-            AwsService.S3.PutObject(fileStream, fileName, bucketName, contentType);
+            AwsService.S3.PutObject(fileStream, $"{folderName}/{fileName}", bucketName, contentType);
+
+            EpubProcessContract processContract = new EpubProcessContract
+            {
+                FromId = epubDownloadContract.FromId,
+                ChatId = epubDownloadContract.ChatId,
+                FileName = fileName,
+                FolderName = folderName,
+                ChaptersToProcess = new System.Collections.Generic.List<int> { 1, 2 }
+            };
+
+            AwsService.SQS.SendMessage(JsonConvert.SerializeObject(processContract));
         }
 
         public TelegramFileResult GetTelegramFile(string fileId)

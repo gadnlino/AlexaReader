@@ -1,6 +1,8 @@
 ﻿using Amazon;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.SQS;
+using Amazon.SQS.Model;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -45,6 +47,26 @@ namespace EpubFileDownloader.Service
                 GetObjectResponse response = task.Result;
 
                 return response.ResponseStream;
+            }
+        }
+
+        public static class SQS
+        {
+            private static AmazonSQSClient client;
+            static SQS()
+            {
+                client = new AmazonSQSClient(RegionEndpoint
+                        .GetBySystemName(Environment.GetEnvironmentVariable("SQS_REGION")));
+            }
+
+            public static void SendMessage(string messageBody, string queueUrl)
+            {
+                var task = client.SendMessageAsync(new SendMessageRequest
+                {
+                    MessageBody = messageBody,
+                    QueueUrl = queueUrl
+                });
+                task.Wait();
             }
         }
     }

@@ -48,11 +48,12 @@ export const hello: APIGatewayProxyHandler = async (event, _context) => {
 
       // console.log(file_path);
       var contract: EpubDownloadContract = {
-        file_id: document.file_id,
-        from_id: ctx.message.from.id.toString(),
-        chat_id: ctx.message.chat.id.toString(),
-        first_name: ctx.message.from.first_name,
-        last_name: ctx.message.from.last_name
+        FileId: document.file_id,
+        Person:{
+          FromId: ctx.message.from.id.toString(),
+          FirstName: ctx.message.from.first_name,
+          LastName: ctx.message.from.last_name
+        }
       };
 
       await awsService.sqs.sendMessage(process.env.FILE_DOWNLOADER_QUEUE_URL,
