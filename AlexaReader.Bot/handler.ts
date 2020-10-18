@@ -2,7 +2,7 @@ import { APIGatewayProxyHandler } from 'aws-lambda';
 import 'source-map-support/register';
 import Telegraf from "telegraf";
 import awsService from "./awsService";
-import { EpubDownloadContract } from './models';
+import { DownloadEpubContract } from './models';
 
 
 export const hello: APIGatewayProxyHandler = async (event, _context) => {
@@ -47,9 +47,9 @@ export const hello: APIGatewayProxyHandler = async (event, _context) => {
       // const { file_path } = response.data.result;
 
       // console.log(file_path);
-      var contract: EpubDownloadContract = {
+      var contract: DownloadEpubContract = {
         FileId: document.file_id,
-        Person:{
+        User:{
           FromId: ctx.message.from.id.toString(),
           FirstName: ctx.message.from.first_name,
           LastName: ctx.message.from.last_name

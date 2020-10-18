@@ -7,7 +7,8 @@ namespace AlexaReader.Core.Model
     public class Chapter
     {
         public string Uuid { get; set; }
-        public string Name { get; set; }
-        public List<Subchapter> SubChapters { get; set; }
+        public string Title { get; set; }
+        public List<Subchapter> Subchapters { get; set; }
+        public string CurrentSubchapterId { get; set; }
     }
 }

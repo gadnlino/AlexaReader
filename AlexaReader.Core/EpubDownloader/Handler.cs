@@ -11,14 +11,19 @@ using System.Net.Http;
 using System.Net;
 using EpubFileDownloader.Service;
 using AlexaReader.Core.Model;
+using Amazon.Runtime.Internal.Util;
 
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
 namespace EpubFileDownloader
 {
     public class Handler
     {
+        ILambdaLogger _logger;
+
         public async Task FunctionHandler(SQSEvent sqsEvent, ILambdaContext context)
         {
+            _logger = context.Logger;
+
             foreach (var record in sqsEvent.Records)
             {
                 await ProcessMessageAsync(record);
@@ -27,9 +32,13 @@ namespace EpubFileDownloader
 
         public async Task ProcessMessageAsync(SQSEvent.SQSMessage message)
         {
-            EpubDownloadContract epubDownloadContract =
-                    JsonConvert.DeserializeObject<EpubDownloadContract>(message.Body);
+            _logger.LogLine("Processing message \n" + message.Body);
 
+            DownloadEpubContract epubDownloadContract =
+                    JsonConvert.DeserializeObject<DownloadEpubContract>(message.Body);
+
+            User user = epubDownloadContract.User;
+            
             TelegramFileResult telegramFileResult = GetTelegramFile(epubDownloadContract.FileId);
 
             Stream fileStream = GetTelegramFileStream(telegramFileResult.Result.FilePath);
@@ -37,30 +46,33 @@ namespace EpubFileDownloader
             string bucketName = Environment.GetEnvironmentVariable("ALEXA_READER_BUCKET");
             string contentType = "application/epub+zip";
             string uuid = Guid.NewGuid().ToString();
-            string folderName = $"{epubDownloadContract.FromId}/{uuid}";
+            string folderName = $"{user.FromId}/{uuid}";
             string fileName = $"{uuid}.epub";
 
             AwsService.S3.PutObject(fileStream, $"{folderName}/{fileName}", bucketName, contentType);
 
-            EpubProcessContract processContract = new EpubProcessContract
+            ParseEpubContract processContract = new ParseEpubContract
             {
-                FromId = epubDownloadContract.FromId,
-                ChatId = epubDownloadContract.ChatId,
+                User = user,
                 FileName = fileName,
                 FolderName = folderName,
-                ChaptersToProcess = new System.Collections.Generic.List<int> { 1, 2 }
             };
 
-            AwsService.SQS.SendMessage(JsonConvert.SerializeObject(processContract));
+            string messageBody = JsonConvert.SerializeObject(processContract);
+            string queueUrl = Environment.GetEnvironmentVariable("PARSE_EPUB_QUEUE_URL");
+            AwsService.SQS.SendMessage(messageBody, queueUrl);
+
+            _logger.LogLine($"Message sent to {queueUrl} queue\n" + messageBody);
         }
 
         public TelegramFileResult GetTelegramFile(string fileId)
         {
             string url = $"https://api.telegram.org/bot{Environment.GetEnvironmentVariable("BOT_TOKEN")}/getFile?file_id={fileId}";
-
+            
+            Uri uri = new Uri(url);
             HttpClient http = new HttpClient();
 
-            var getTask = http.GetAsync(url);
+            var getTask = http.GetAsync(uri);
             getTask.Wait();
             HttpResponseMessage response = getTask.Result;
 

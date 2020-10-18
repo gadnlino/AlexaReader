@@ -1,10 +1,10 @@
-export interface Person{
+export interface User{
 	FromId: string,
 	FirstName: string,
 	LastName: string
 }
 
-export interface EpubDownloadContract {
+export interface DownloadEpubContract {
 	FileId: string,
-	Person: Person
+	User: User
 }

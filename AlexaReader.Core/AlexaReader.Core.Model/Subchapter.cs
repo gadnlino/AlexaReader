@@ -7,7 +7,7 @@ namespace AlexaReader.Core.Model
     public class Subchapter
     {
         public string Uuid { get; set; }
-        public int CurrentPosition { get; set; }
-        public int AudioFileName { get; set; }
+        public string AudioFilePath { get; set; }
+        public int CurrentTimePosition { get; set; }
     }
 }

@@ -1,8 +1,12 @@
 ﻿using Amazon;
+using Amazon.Polly;
+using Amazon.Polly.Model;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using Amazon.Comprehend.Model;
+using Amazon.Comprehend;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -59,14 +63,95 @@ namespace EpubFileDownloader.Service
                         .GetBySystemName(Environment.GetEnvironmentVariable("SQS_REGION")));
             }
 
-            public static void SendMessage(string messageBody, string queueUrl)
+            public static void SendMessage(string messageBody, string queueUrl,
+                    string messageGroupId = null, string messageDeduplicationId = null)
             {
-                var task = client.SendMessageAsync(new SendMessageRequest
+                var request = new SendMessageRequest
                 {
                     MessageBody = messageBody,
                     QueueUrl = queueUrl
+                };
+
+                //Used to group messages in a fifo queue
+                if (!string.IsNullOrWhiteSpace(messageGroupId))
+                {
+                    request.MessageGroupId = messageGroupId;
+                }
+
+                //Used to desambiguate messages in a fifo queue
+                if (!string.IsNullOrWhiteSpace(messageDeduplicationId))
+                {
+                    request.MessageDeduplicationId = messageDeduplicationId;
+                }
+
+                var task = client.SendMessageAsync(request);
+                task.Wait();
+            }
+
+            public static void SendMessageBatch(List<SendMessageBatchRequestEntry> messages, string queueUrl)
+            {
+                var request = new SendMessageBatchRequest
+                {
+                    Entries = messages,
+                    QueueUrl = queueUrl
+                };
+
+                var task = client.SendMessageBatchAsync(request);
+                task.Wait();
+            }
+        }
+
+        public static class Polly
+        {
+            private static AmazonPollyClient client;
+
+            static Polly()
+            {
+                client = new AmazonPollyClient(RegionEndpoint
+                    .GetBySystemName(Environment.GetEnvironmentVariable("POLLY_REGION")));
+            }
+
+            public static SynthesizeSpeechResponse SynthesizeSpeech(string textContent,
+                Amazon.Polly.LanguageCode languageCode, string outputFormat = "mp3")
+            {
+                var synteshisRequest = new SynthesizeSpeechRequest
+                {
+                    Engine = Engine.Neural,
+                    OutputFormat = outputFormat,
+                    //SampleRate = "8000",
+                    Text = textContent,
+                    TextType = "text",
+                    VoiceId = VoiceId.Joanna,
+                    LanguageCode = languageCode
+                };
+
+                var client = new AmazonPollyClient(RegionEndpoint.USEast1);
+
+                var task = client.SynthesizeSpeechAsync(synteshisRequest);
+                task.Wait();
+
+                return task.Result;
+            }
+        }
+
+        public static class Comprehend
+        {
+            private static AmazonComprehendClient client;
+            static Comprehend()
+            {
+                client = new AmazonComprehendClient(RegionEndpoint
+                    .GetBySystemName(Environment.GetEnvironmentVariable("COMPREHEND_REGION")));
+            }
+
+            public static DetectDominantLanguageResponse DetectDominantLanguage(string text)
+            {
+                var task = client.DetectDominantLanguageAsync(new DetectDominantLanguageRequest
+                {
+                    Text = text
                 });
                 task.Wait();
+
+                return task.Result;
             }
         }
     }

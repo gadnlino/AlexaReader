@@ -1,33 +1,51 @@
-﻿using System;
+using AlexaReader.Core.Model;
+using Amazon;
+using Amazon.Lambda.Core;
+using Amazon.Lambda.SQSEvents;
+using Amazon.SQS.Model;
+using EpubFileDownloader.Service;
+using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using VersOne.Epub;
-using VersOne.Epub.Schema;
-using static System.Net.Mime.MediaTypeNames;
-using System.Xml.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
-using System.Data.SqlTypes;
-using Amazon.Polly;
-using Amazon.Polly.Model;
-using Amazon;
-using Amazon.Runtime;
+using System.Threading.Tasks;
+using VersOne.Epub;
 
-namespace AlexaEbookReader
+[assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
+namespace AwsDotnetCsharp
 {
-    class Program
+    public class Handler
     {
-        static void Main(string[] args)
+        public async Task FunctionHandler(SQSEvent sqsEvent, ILambdaContext context)
         {
-            // Opens a book and reads all of its content into memory
-            EpubBook epubBook = EpubReader.ReadBook("teste.epub");
+            foreach (var record in sqsEvent.Records)
+            {
+                await ProcessMessageAsync(record);
+            }
+        }
 
-            //// Enumerating the whole text content of the book in the order of reading
-            //foreach (EpubTextContentFile textContentFile in epubBook.ReadingOrder)
-            //{
-            //    // HTML of current text content file
-            //    string htmlContent = textContentFile.Content;
-            //}
+        public async Task ProcessMessageAsync(SQSEvent.SQSMessage message)
+        {
+            ParseEpubContract parseEpubContract =
+                    JsonConvert.DeserializeObject<ParseEpubContract>(message.Body);
+
+            string bucketName = Environment.GetEnvironmentVariable("ALEXA_READER_BUCKET");
+            string filePath = $"{parseEpubContract.FolderName}/{parseEpubContract.FileName}";
+
+            Stream fileStream = AwsService.S3.GetObject(filePath, bucketName);
+
+            // Opens a book and reads all of its content into memory
+            EpubBook epubBook = EpubReader.ReadBook(fileStream);
+
+            Book book = new Book();
+            book.Uuid = Guid.NewGuid().ToString();
+            book.Title = epubBook.Title;
+            book.Chapters = new List<Chapter>();
+            book.Owner = parseEpubContract.User;
+            book.EpubFilePath = filePath;
 
             List<string> chaptersToSkip = new List<string>
             {
@@ -37,62 +55,93 @@ namespace AlexaEbookReader
                 "quick glossary"
             };
 
-            var validChapters = epubBook.Navigation
+            List<EpubNavigationItem> validChapters = epubBook.Navigation
                         .Where(c => !chaptersToSkip.Contains(c.Title.ToLower()))
                         .ToList();
 
-            string bookContent = string.Empty;
+            List<ConvertTextToSpeechContract> convertTextToSpeechContracts =
+                    new List<ConvertTextToSpeechContract>();
 
-            foreach (EpubNavigationItem chapter in validChapters)
+            foreach (EpubNavigationItem epubChapter in validChapters)
             {
-                // Title of chapter
-                string chapterTitle = chapter.Title;
-
-                string chapterContent = string.Empty;
+                Chapter chapter = new Chapter();
+                chapter.Uuid = Guid.NewGuid().ToString();
+                chapter.Title = epubChapter.Title;
+                chapter.Subchapters = new List<Subchapter>();
 
                 // Nested chapters
-                List<EpubNavigationItem> subChapters = chapter.NestedItems;
+                List<EpubNavigationItem> subChapters = epubChapter.NestedItems;
 
                 foreach (var subChapter in subChapters)
                 {
                     EpubTextContentFile content = subChapter.HtmlContentFile;
-                    //XDocument html = XDocument.Parse(content.Content);
 
-                    //foreach(var desc in html.Descendants())
-                    //{
-                    //    Console.WriteLine(desc.Value);
-                    //}
                     string stripped = StripHTML(content.Content);
-                    //Console.WriteLine(stripped);
-                    bookContent += stripped;
-                    chapterContent += stripped;
+
+                    string id = Guid.NewGuid().ToString();
+                    string audioFilePath = $"{parseEpubContract.FolderName}/{id}.mp3";
+
+                    chapter.Subchapters.Add(new Subchapter
+                    {
+                        AudioFilePath = audioFilePath,
+                        Uuid = id,
+                        CurrentTimePosition = 0
+                    });
+
+                    convertTextToSpeechContracts.Add(new ConvertTextToSpeechContract
+                    {
+                        TextContent = stripped,
+                        AudioFilePathToSave = audioFilePath,
+                        Owner = parseEpubContract.User
+                    });
                 }
 
-                Console.WriteLine(chapterTitle);
-                Console.WriteLine(chapterContent.Length);
+                chapter.CurrentSubchapterId = chapter.Subchapters.FirstOrDefault()?.Uuid;
+                book.Chapters.Add(chapter);
             }
 
-            Console.WriteLine(bookContent.Length);
+            book.CurrentChapterId = book.Chapters.FirstOrDefault()?.Uuid;
 
+            string queueUrl = Environment.GetEnvironmentVariable("CONVERSION_QUEUE_URL");
+            string messageGroupId = Guid.NewGuid().ToString();
 
-            //Synthetizing the first subchapter
+            List<SendMessageBatchRequestEntry> messages = new List<SendMessageBatchRequestEntry>();
 
-            var firstChapter = validChapters.First();
+            Action<ConvertTextToSpeechContract> addMessageToSend = (contract) =>
+            {
+                string messageBody = JsonConvert.SerializeObject(contract);
+                string messageDeduplicationId = Guid.NewGuid().ToString();
 
-            var firstSubChapter = firstChapter.NestedItems.First();
+                messages.Add(new SendMessageBatchRequestEntry
+                {
+                    Id = messageDeduplicationId,
+                    MessageBody = messageBody,
+                    MessageGroupId = messageGroupId,
+                    MessageDeduplicationId = messageDeduplicationId
+                });
+            };
 
-            var txtContent = StripHTML(firstSubChapter.HtmlContentFile.Content);
+            convertTextToSpeechContracts
+                .Take(convertTextToSpeechContracts.Count - 1)
+                .ToList()
+                .ForEach(contract => addMessageToSend(contract));
 
-            Console.WriteLine(txtContent);
+            ConvertTextToSpeechContract last = convertTextToSpeechContracts.Last();
+            last.NotifyOwner = true;
+            addMessageToSend(last);
+
+            List<List<SendMessageBatchRequestEntry>> messageGroups = SplitList(messages, 10).ToList();
+
+            messageGroups.ForEach(messageGroup =>
+            {
+                AwsService.SQS.SendMessageBatch(messageGroup, queueUrl);
+            });
 
             var synteshisRequest = new SynthesizeSpeechRequest
             {
-                // LexiconNames = new List<string> {
-                //     "example"
-                //},
                 Engine = Engine.Neural,
                 OutputFormat = "mp3",
-                SampleRate = "8000",
+                //SampleRate = "8000",
                 Text = txtContent,
                 TextType = "text",
                 VoiceId = VoiceId.Joanna,
@@ -105,11 +154,7 @@ namespace AlexaEbookReader
             task.Wait();
             var response = task.Result;
 
-            Console.WriteLine($"Synthetized {response.RequestCharacters} caracthers");
-
-            byte[] audioBytes = ReadToEnd(response.AudioStream);
-
-            File.WriteAllBytes($"teste_{DateTime.Now.ToString("yyyyMMddhhmmss")}.mp3", audioBytes);
+            //Console.WriteLine($"Synthetized {response.RequestCharacters} caracthers");
 
             //// COMMON PROPERTIES
 
@@ -246,55 +291,11 @@ namespace AlexaEbookReader
             //StructuralSemanticsProperty? ssp = epub3NavDocument.Navs.First().Type;
         }
 
-        public static byte[] ReadToEnd(Stream stream)
+        public static IEnumerable<List<T>> SplitList<T>(List<T> locations, int nSize = 30)
         {
-            long originalPosition = 0;
-
-            if (stream.CanSeek)
+            for (int i = 0; i < locations.Count; i += nSize)
             {
-                originalPosition = stream.Position;
-                stream.Position = 0;
-            }
-
-            try
-            {
-                byte[] readBuffer = new byte[4096];
-
-                int totalBytesRead = 0;
-                int bytesRead;
-
-                while ((bytesRead = stream.Read(readBuffer, totalBytesRead, readBuffer.Length - totalBytesRead)) > 0)
-                {
-                    totalBytesRead += bytesRead;
-
-                    if (totalBytesRead == readBuffer.Length)
-                    {
-                        int nextByte = stream.ReadByte();
-                        if (nextByte != -1)
-                        {
-                            byte[] temp = new byte[readBuffer.Length * 2];
-                            Buffer.BlockCopy(readBuffer, 0, temp, 0, readBuffer.Length);
-                            Buffer.SetByte(temp, totalBytesRead, (byte)nextByte);
-                            readBuffer = temp;
-                            totalBytesRead++;
-                        }
-                    }
-                }
-
-                byte[] buffer = readBuffer;
-                if (readBuffer.Length != totalBytesRead)
-                {
-                    buffer = new byte[totalBytesRead];
-                    Buffer.BlockCopy(readBuffer, 0, buffer, 0, totalBytesRead);
-                }
-                return buffer;
-            }
-            finally
-            {
-                if (stream.CanSeek)
-                {
-                    stream.Position = originalPosition;
-                }
+                yield return locations.GetRange(i, Math.Min(nSize, locations.Count - i));
             }
         }
 
